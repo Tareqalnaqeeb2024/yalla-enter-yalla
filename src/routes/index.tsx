@@ -19,7 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Card } from "@/components/ui/card";
-import { Trash2, Save, Package, Calculator, NotebookPen } from "lucide-react";
+import { Trash2, Save, Package, Calculator, NotebookPen, Pencil, X } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   component: Index,
@@ -29,6 +29,7 @@ type ProductType = "صيني" | "فرنسي" | "مصري" | "تركي";
 
 interface Product {
   id: string;
+  page: number;
   name: string;
   type: ProductType;
   quantity: number;
@@ -46,11 +47,14 @@ function Index() {
   const [year, setYear] = useState<string>(String(currentYear));
   const [data, setData] = useState<ProductsByYear>({});
 
+  const [page, setPage] = useState("");
   const [name, setName] = useState("");
   const [type, setType] = useState<ProductType>("صيني");
   const [quantity, setQuantity] = useState("");
   const [price, setPrice] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
 
+  const pageRef = useRef<HTMLInputElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const typeRef = useRef<HTMLButtonElement>(null);
   const qtyRef = useRef<HTMLInputElement>(null);
@@ -65,36 +69,60 @@ function Index() {
   }, [products]);
 
   useEffect(() => {
-    nameRef.current?.focus();
+    pageRef.current?.focus();
   }, []);
 
   const resetForm = () => {
+    setPage("");
     setName("");
     setType("صيني");
     setQuantity("");
     setPrice("");
-    nameRef.current?.focus();
+    setEditingId(null);
+    pageRef.current?.focus();
   };
 
   const save = () => {
     const trimmed = name.trim();
+    const pg = Number(page);
     const q = Number(quantity);
     const p = Number(price);
-    if (!trimmed || !Number.isFinite(q) || !Number.isFinite(p) || q <= 0 || p < 0) {
-      nameRef.current?.focus();
+    if (
+      !trimmed ||
+      !Number.isFinite(pg) ||
+      pg <= 0 ||
+      !Number.isFinite(q) ||
+      !Number.isFinite(p) ||
+      q <= 0 ||
+      p < 0
+    ) {
+      pageRef.current?.focus();
       return;
     }
-    const product: Product = {
-      id: crypto.randomUUID(),
-      name: trimmed,
-      type,
-      quantity: q,
-      price: p,
-    };
-    setData((prev) => ({
-      ...prev,
-      [year]: [product, ...(prev[year] ?? [])],
-    }));
+
+    if (editingId) {
+      setData((prev) => ({
+        ...prev,
+        [year]: (prev[year] ?? []).map((it) =>
+          it.id === editingId
+            ? { ...it, page: pg, name: trimmed, type, quantity: q, price: p }
+            : it,
+        ),
+      }));
+    } else {
+      const product: Product = {
+        id: crypto.randomUUID(),
+        page: pg,
+        name: trimmed,
+        type,
+        quantity: q,
+        price: p,
+      };
+      setData((prev) => ({
+        ...prev,
+        [year]: [product, ...(prev[year] ?? [])],
+      }));
+    }
     resetForm();
   };
 
@@ -103,6 +131,17 @@ function Index() {
       ...prev,
       [year]: (prev[year] ?? []).filter((p) => p.id !== id),
     }));
+    if (editingId === id) resetForm();
+  };
+
+  const startEdit = (p: Product) => {
+    setEditingId(p.id);
+    setPage(String(p.page));
+    setName(p.name);
+    setType(p.type);
+    setQuantity(String(p.quantity));
+    setPrice(String(p.price));
+    pageRef.current?.focus();
   };
 
   const handleGlobalKey = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -192,7 +231,7 @@ function Index() {
         <Card className="p-4 md:p-6">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-base font-semibold text-foreground">
-              نموذج إدخال البيانات
+              {editingId ? "تعديل المنتج" : "نموذج إدخال البيانات"}
             </h2>
             <span className="text-xs text-muted-foreground">
               اختصار: Ctrl + Enter للحفظ
@@ -200,7 +239,21 @@ function Index() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-            <div className="md:col-span-4 space-y-1.5">
+            <div className="md:col-span-1 space-y-1.5">
+              <Label htmlFor="page">الصفحة</Label>
+              <Input
+                id="page"
+                ref={pageRef}
+                inputMode="numeric"
+                dir="ltr"
+                value={page}
+                onChange={(e) => setPage(e.target.value.replace(/[^\d]/g, ""))}
+                onKeyDown={(e) => onEnter(e, () => nameRef.current?.focus())}
+                placeholder="0"
+              />
+            </div>
+
+            <div className="md:col-span-3 space-y-1.5">
               <Label htmlFor="name">اسم المنتج</Label>
               <Input
                 id="name"
@@ -222,15 +275,7 @@ function Index() {
                   qtyRef.current?.focus();
                 }}
               >
-                <SelectTrigger
-                  ref={typeRef}
-                  dir="rtl"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      // allow native open/close; then move on next Enter
-                    }
-                  }}
-                >
+                <SelectTrigger ref={typeRef} dir="rtl">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent dir="rtl">
@@ -275,11 +320,21 @@ function Index() {
               />
             </div>
 
-            <div className="md:col-span-1 flex md:items-end">
+            <div className="md:col-span-1 flex md:items-end gap-2">
               <Button onClick={save} className="w-full gap-2">
                 <Save className="h-4 w-4" />
-                حفظ
+                {editingId ? "تحديث" : "حفظ"}
               </Button>
+              {editingId && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={resetForm}
+                  aria-label="إلغاء"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
             </div>
           </div>
         </Card>
@@ -299,19 +354,20 @@ function Index() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="text-right">الصفحة</TableHead>
                   <TableHead className="text-right">اسم المنتج</TableHead>
                   <TableHead className="text-right">النوع</TableHead>
                   <TableHead className="text-right">الكمية</TableHead>
                   <TableHead className="text-right">السعر</TableHead>
                   <TableHead className="text-right">الإجمالي</TableHead>
-                  <TableHead className="text-right w-16">حذف</TableHead>
+                  <TableHead className="text-right w-28">إجراءات</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {products.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={6}
+                      colSpan={7}
                       className="text-center text-muted-foreground py-10"
                     >
                       لا توجد منتجات بعد. ابدأ بإضافة أول منتج.
@@ -319,7 +375,11 @@ function Index() {
                   </TableRow>
                 ) : (
                   products.map((p) => (
-                    <TableRow key={p.id}>
+                    <TableRow
+                      key={p.id}
+                      data-state={editingId === p.id ? "selected" : undefined}
+                    >
+                      <TableCell dir="ltr">{fmt(p.page)}</TableCell>
                       <TableCell className="font-medium">{p.name}</TableCell>
                       <TableCell>{p.type}</TableCell>
                       <TableCell dir="ltr">{fmt(p.quantity)}</TableCell>
@@ -328,15 +388,26 @@ function Index() {
                         {fmt(p.quantity * p.price)}
                       </TableCell>
                       <TableCell>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={() => remove(p.id)}
-                          aria-label="حذف"
-                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => startEdit(p)}
+                            aria-label="تعديل"
+                            className="text-primary hover:text-primary hover:bg-primary/10"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => remove(p.id)}
+                            aria-label="حذف"
+                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))
