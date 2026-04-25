@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useRef, useState, useMemo, useEffect, type KeyboardEvent } from "react";
+import { useRef, useState, useMemo, useEffect, useCallback, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,40 +19,56 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Card } from "@/components/ui/card";
-import { Trash2, Save, Package, Calculator, NotebookPen, Pencil, X } from "lucide-react";
+import {
+  Trash2,
+  Save,
+  Package,
+  Calculator,
+  NotebookPen,
+  Download,
+  Search,
+  Settings2,
+  Loader2,
+  RefreshCw,
+} from "lucide-react";
+import {
+  listProducts,
+  createProduct,
+  deleteProduct,
+  exportUrl,
+  getApiBase,
+  setApiBase,
+  type ApiProduct,
+} from "@/lib/api";
 
 export const Route = createFileRoute("/")({
   component: Index,
 });
 
-type ProductType = "صيني" | "فرنسي" | "مصري" | "تركي";
-
-interface Product {
-  id: string;
-  page: number;
-  name: string;
-  type: ProductType;
-  quantity: number;
-  price: number;
-}
-
-type ProductsByYear = Record<string, Product[]>;
-
-const TYPES: ProductType[] = ["صيني", "فرنسي", "مصري", "تركي"];
+const TYPES = ["صيني", "فرنسي", "مصري", "تركي"] as const;
+const CURRENCIES = ["IQD", "USD", "EUR", "SAR"] as const;
 
 const currentYear = new Date().getFullYear();
 const YEARS = Array.from({ length: 11 }, (_, i) => String(currentYear - i));
 
 function Index() {
   const [year, setYear] = useState<string>(String(currentYear));
-  const [data, setData] = useState<ProductsByYear>({});
+  const [search, setSearch] = useState("");
+  const [products, setProducts] = useState<ApiProduct[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
+  const [apiUrl, setApiUrlState] = useState<string>(() => getApiBase());
+  const [showSettings, setShowSettings] = useState(false);
+
+  // form
   const [page, setPage] = useState("");
   const [name, setName] = useState("");
-  const [type, setType] = useState<ProductType>("صيني");
+  const [type, setType] = useState<(typeof TYPES)[number]>("صيني");
+  const [currency, setCurrency] = useState<(typeof CURRENCIES)[number]>("IQD");
   const [quantity, setQuantity] = useState("");
   const [price, setPrice] = useState("");
-  const [editingId, setEditingId] = useState<string | null>(null);
 
   const pageRef = useRef<HTMLInputElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -60,17 +76,40 @@ function Index() {
   const qtyRef = useRef<HTMLInputElement>(null);
   const priceRef = useRef<HTMLInputElement>(null);
 
-  const products = data[year] ?? [];
-
   const totals = useMemo(() => {
     const count = products.length;
     const total = products.reduce((s, p) => s + p.quantity * p.price, 0);
     return { count, total };
   }, [products]);
 
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await listProducts({
+        year: Number(year),
+        search: search.trim() || undefined,
+      });
+      setProducts(data);
+    } catch (e) {
+      setError(
+        "تعذّر الاتصال بالخادم. تأكد من تشغيل الـ API على " +
+          getApiBase() +
+          " وقبول شهادة SSL في المتصفح، وتفعيل CORS.",
+      );
+      setProducts([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [year, search]);
+
   useEffect(() => {
     pageRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const resetForm = () => {
     setPage("");
@@ -78,11 +117,10 @@ function Index() {
     setType("صيني");
     setQuantity("");
     setPrice("");
-    setEditingId(null);
     pageRef.current?.focus();
   };
 
-  const save = () => {
+  const save = async () => {
     const trimmed = name.trim();
     const pg = Number(page);
     const q = Number(quantity);
@@ -100,48 +138,51 @@ function Index() {
       return;
     }
 
-    if (editingId) {
-      setData((prev) => ({
-        ...prev,
-        [year]: (prev[year] ?? []).map((it) =>
-          it.id === editingId
-            ? { ...it, page: pg, name: trimmed, type, quantity: q, price: p }
-            : it,
-        ),
-      }));
-    } else {
-      const product: Product = {
-        id: crypto.randomUUID(),
+    setSaving(true);
+    setError(null);
+    try {
+      const created = await createProduct({
         page: pg,
         name: trimmed,
-        type,
+        category: type,
         quantity: q,
         price: p,
-      };
-      setData((prev) => ({
-        ...prev,
-        [year]: [product, ...(prev[year] ?? [])],
-      }));
+        currency,
+        year: Number(year),
+      });
+      setProducts((prev) => [created, ...prev]);
+      resetForm();
+    } catch {
+      setError("فشل حفظ المنتج. تحقق من الاتصال بالخادم.");
+    } finally {
+      setSaving(false);
     }
-    resetForm();
   };
 
-  const remove = (id: string) => {
-    setData((prev) => ({
-      ...prev,
-      [year]: (prev[year] ?? []).filter((p) => p.id !== id),
-    }));
-    if (editingId === id) resetForm();
+  const remove = async (id: number) => {
+    const prev = products;
+    setProducts((p) => p.filter((x) => x.id !== id));
+    try {
+      await deleteProduct(id);
+    } catch {
+      setProducts(prev);
+      setError("فشل حذف المنتج.");
+    }
   };
 
-  const startEdit = (p: Product) => {
-    setEditingId(p.id);
-    setPage(String(p.page));
-    setName(p.name);
-    setType(p.type);
-    setQuantity(String(p.quantity));
-    setPrice(String(p.price));
-    pageRef.current?.focus();
+  const handleExport = () => {
+    const url = exportUrl({
+      year: Number(year),
+      search: search.trim() || undefined,
+    });
+    window.open(url, "_blank");
+  };
+
+  const saveApiUrl = () => {
+    setApiBase(apiUrl.trim());
+    setApiUrlState(getApiBase());
+    setShowSettings(false);
+    refresh();
   };
 
   const handleGlobalKey = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -179,15 +220,15 @@ function Index() {
                 دفتر قطع الغيار
               </h1>
               <p className="text-xs md:text-sm text-muted-foreground">
-                أداة إدخال سريعة بلوحة المفاتيح
+                متصل بـ <span dir="ltr">{apiUrl}</span>
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Label className="text-sm text-muted-foreground">السنة</Label>
             <Select value={year} onValueChange={setYear}>
-              <SelectTrigger className="w-32" dir="rtl">
+              <SelectTrigger className="w-28" dir="rtl">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent dir="rtl">
@@ -198,8 +239,54 @@ function Index() {
                 ))}
               </SelectContent>
             </Select>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={refresh}
+              aria-label="تحديث"
+              disabled={loading}
+            >
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setShowSettings((s) => !s)}
+              aria-label="إعدادات"
+            >
+              <Settings2 className="h-4 w-4" />
+            </Button>
           </div>
         </header>
+
+        {showSettings && (
+          <Card className="p-4">
+            <Label className="text-sm">عنوان الـ API</Label>
+            <div className="mt-2 flex gap-2">
+              <Input
+                dir="ltr"
+                value={apiUrl}
+                onChange={(e) => setApiUrlState(e.target.value)}
+                placeholder="https://localhost:7151"
+              />
+              <Button onClick={saveApiUrl}>حفظ</Button>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              تنبيه: افتح <span dir="ltr">{apiUrl}/api/Products</span> في
+              المتصفح وقبول شهادة SSL أولاً، وتأكد من تفعيل CORS في الخادم.
+            </p>
+          </Card>
+        )}
+
+        {error && (
+          <Card className="p-3 border-destructive bg-destructive/5 text-destructive text-sm">
+            {error}
+          </Card>
+        )}
 
         {/* Stats */}
         <div className="grid grid-cols-2 gap-3">
@@ -231,7 +318,7 @@ function Index() {
         <Card className="p-4 md:p-6">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-base font-semibold text-foreground">
-              {editingId ? "تعديل المنتج" : "نموذج إدخال البيانات"}
+              نموذج إدخال البيانات
             </h2>
             <span className="text-xs text-muted-foreground">
               اختصار: Ctrl + Enter للحفظ
@@ -266,12 +353,12 @@ function Index() {
               />
             </div>
 
-            <div className="md:col-span-3 space-y-1.5">
+            <div className="md:col-span-2 space-y-1.5">
               <Label>النوع</Label>
               <Select
                 value={type}
                 onValueChange={(v) => {
-                  setType(v as ProductType);
+                  setType(v as (typeof TYPES)[number]);
                   qtyRef.current?.focus();
                 }}
               >
@@ -320,23 +407,55 @@ function Index() {
               />
             </div>
 
-            <div className="md:col-span-1 flex md:items-end gap-2">
-              <Button onClick={save} className="w-full gap-2">
-                <Save className="h-4 w-4" />
-                {editingId ? "تحديث" : "حفظ"}
+            <div className="md:col-span-1 space-y-1.5">
+              <Label>العملة</Label>
+              <Select
+                value={currency}
+                onValueChange={(v) =>
+                  setCurrency(v as (typeof CURRENCIES)[number])
+                }
+              >
+                <SelectTrigger dir="ltr">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent dir="ltr">
+                  {CURRENCIES.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="md:col-span-1 flex md:items-end">
+              <Button onClick={save} disabled={saving} className="w-full gap-2">
+                {saving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                حفظ
               </Button>
-              {editingId && (
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={resetForm}
-                  aria-label="إلغاء"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              )}
             </div>
           </div>
+        </Card>
+
+        {/* Search + Export */}
+        <Card className="p-4 flex items-center gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="بحث بالاسم أو النوع..."
+              className="pr-9"
+            />
+          </div>
+          <Button onClick={handleExport} variant="outline" className="gap-2">
+            <Download className="h-4 w-4" />
+            تصدير Excel
+          </Button>
         </Card>
 
         {/* Table */}
@@ -359,15 +478,25 @@ function Index() {
                   <TableHead className="text-right">النوع</TableHead>
                   <TableHead className="text-right">الكمية</TableHead>
                   <TableHead className="text-right">السعر</TableHead>
+                  <TableHead className="text-right">العملة</TableHead>
                   <TableHead className="text-right">الإجمالي</TableHead>
-                  <TableHead className="text-right w-28">إجراءات</TableHead>
+                  <TableHead className="text-right w-20">إجراءات</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {products.length === 0 ? (
+                {loading ? (
                   <TableRow>
                     <TableCell
-                      colSpan={7}
+                      colSpan={8}
+                      className="text-center text-muted-foreground py-10"
+                    >
+                      <Loader2 className="h-5 w-5 animate-spin inline" />
+                    </TableCell>
+                  </TableRow>
+                ) : products.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={8}
                       className="text-center text-muted-foreground py-10"
                     >
                       لا توجد منتجات بعد. ابدأ بإضافة أول منتج.
@@ -375,39 +504,26 @@ function Index() {
                   </TableRow>
                 ) : (
                   products.map((p) => (
-                    <TableRow
-                      key={p.id}
-                      data-state={editingId === p.id ? "selected" : undefined}
-                    >
+                    <TableRow key={p.id}>
                       <TableCell dir="ltr">{fmt(p.page)}</TableCell>
                       <TableCell className="font-medium">{p.name}</TableCell>
-                      <TableCell>{p.type}</TableCell>
+                      <TableCell>{p.category}</TableCell>
                       <TableCell dir="ltr">{fmt(p.quantity)}</TableCell>
                       <TableCell dir="ltr">{fmt(p.price)}</TableCell>
+                      <TableCell dir="ltr">{p.currency}</TableCell>
                       <TableCell dir="ltr" className="font-semibold">
                         {fmt(p.quantity * p.price)}
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => startEdit(p)}
-                            aria-label="تعديل"
-                            className="text-primary hover:text-primary hover:bg-primary/10"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => remove(p.id)}
-                            aria-label="حذف"
-                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => remove(p.id)}
+                          aria-label="حذف"
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))
