@@ -226,7 +226,8 @@ function Index() {
       }
       
       resetForm();
-      refresh();
+      await refresh();
+      await fetchAllNames();
     } catch {
       setError("فشل حفظ البيانات. تحقق من الاتصال.");
     } finally {
@@ -238,7 +239,8 @@ function Index() {
     if (!confirm("هل أنت متأكد من حذف هذا البند؟")) return;
     try {
       await deleteProduct(id);
-      refresh();
+      await refresh();
+      await fetchAllNames();
     } catch {
       setError("فشل حذف المنتج.");
     }
