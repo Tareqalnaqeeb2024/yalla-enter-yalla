@@ -1,5 +1,5 @@
 // API client for PartsLedger backend
-const DEFAULT_BASE = "https://localhost:7151";
+const DEFAULT_BASE = "http://localhost:5297";
 
 /**
  * الحصول على عنوان الـ API من التخزين المحلي أو استخدام العنوان الافتراضي

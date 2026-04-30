@@ -56,7 +56,7 @@ const CURRENCIES = ["دولار", "يورو", "جنية", "سعودي"] as const
 
 const currentYear = new Date().getFullYear();
 const YEARS = Array.from({ length: currentYear - 2007 + 1 }, (_, i) => String(currentYear - i));
-const PAGES = Array.from({ length: 100 }, (_, i) => String(i + 1));
+const PAGES = Array.from({ length: 200 }, (_, i) => String(i + 1));
 
 function Index() {
   // Filters & State
@@ -112,7 +112,7 @@ function Index() {
       return [];
     }
     const suggestions = allNames
-      .filter((existingName) => existingName.toLowerCase().includes(term))
+      .filter((existingName) => existingName.toLowerCase().startsWith(term))
       .slice(0, 6);
     setShowSuggestions(suggestions.length > 0);
     setSelectedSuggestionIndex(-1); // Reset selection when suggestions change
